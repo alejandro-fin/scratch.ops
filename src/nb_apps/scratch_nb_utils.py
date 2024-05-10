@@ -13,13 +13,13 @@ class Scratch_NB_Utils(NotebookUtils):
 
         # __file__ is something like 
         #
-        #        '/home/alex/consultant1@CCL/scratch_fork/scratch.ops/nb_apps/scratch_nb_utils.py'
+        #        '/home/alex/consultant1@CCL/scratch_fork/scratch.ops/src/nb_apps/scratch_nb_utils.py'
         #
-        # So to get the repo ("scratch.ops") we need to go 1 directories up.
+        # So to get the repo ("scratch.ops") we need to go 2 directories up.
         #
         directory                       = _os.path.dirname(__file__)
 
-        for idx in range(1):
+        for idx in range(2):
             directory                   = _os.path.dirname(directory)
         repo_directory                  = directory
 
