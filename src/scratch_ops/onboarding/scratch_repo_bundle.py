@@ -15,9 +15,5 @@ class ScratchRepoBundle(RepoBundle):
         :rtype: List[str]
         '''
         repo_info_l                                     = super().bundled_repos()
-        #repo_info_l.append(RepoInfo("scratch", "limon",
-        #                   "Source code for test framework available to applications built with the '" 
-        #                        + self.project_name + "'."))
-
 
         return repo_info_l
