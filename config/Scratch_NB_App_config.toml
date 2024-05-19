@@ -1,0 +1,3 @@
+[secrets]
+
+vault_location = "$SCENARIOS_REPO/secrets.yaml"
