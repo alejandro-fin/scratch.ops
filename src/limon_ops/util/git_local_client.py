@@ -1,3 +1,5 @@
+import asyncio
+
 import git                                                          as _git
 from pathlib                                                        import Path
 
@@ -28,13 +30,13 @@ class GitLocalClient():
         
         self.executor                                       = _git.cmd.Git(repo_path)
 
-    def execute(self, command):
+    async def execute(self, command):
         '''
         :param str command: a GIT command to execute. Example: "git status"
         :return: the result of attempting to invoke the GIT ``command``
         :rtype: str
         '''
-        Application.app().log(f"~~~~    limon      GitLocalClient   ~~~~ ")
+        #Application.app().log(f"~~~~    limon     async  GitLocalClient   ~~~~ ")
 
         # GOTCHA: On Linux, GitPython requires commands with arguments to be passed as a list, not
         #       as a string. Thus, a command like "git status" should be passed in Linux as
@@ -45,7 +47,8 @@ class GitLocalClient():
         args_list                                           = CommandParser().get_argument_list(command)
         
         try:
-            response                                        = self.executor.execute(args_list)
+            response                                        = await asyncio.to_thread(self.executor.execute,
+                                                                                        args_list)
 
             return response
         except Exception as ex:

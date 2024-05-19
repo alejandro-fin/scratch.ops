@@ -1,6 +1,8 @@
+import asyncio
+
 from git                                                            import Repo
 
-from conway.application.application                                 import Application
+#from conway.application.application                                 import Application
 
 from conway.observability.logger                                    import Logger
 from conway.util.profiler                                           import Profiler
@@ -57,77 +59,102 @@ class RepoSetup():
                             repos for `project` will get cloned. If it is None, the project folder will be 
                             as specified by the suer profile `self.profile_name` 
         '''
-        Application.app().log(f"~~~~    limon      RepoSetup   ~~~~ ")
+        #Application.app().log(f"~~~~    limon      RepoSetup   ~~~~ ")
+        return asyncio.run(self._supervisor(project, filter, operate, root_folder))
+
+    async def _supervisor(self, project, filter, operate, root_folder):
 
         P                                               = self.profile
-
-        BRANCHES_TO_CREATE                              = P.BRANCHES_TO_CREATE(operate)
         REPO_LIST                                       = P.REPO_LIST(project)
-        LOCAL_ROOT                                      = P.LOCAL_ROOT(operate, root_folder)
-        REMOTE_ROOT                                     = P.REMOTE_ROOT
-        
-        # Per CCL policy, we don't want to clone the master branch, since it should never exist locally.
-        # Therefore have to clone a different branch and only bring in that branch during the cloning.
-        branch_to_clone                                 = BRANCHES_TO_CREATE[0]
-        kwargs                                          = {"branch": branch_to_clone}
 
         repos_to_clone                                  = REPO_LIST if filter is None else [n for n in REPO_LIST if n in filter] 
         
         Logger.log_info(f"Will set up repos {repos_to_clone} after applying filter {filter}")
 
-        for some_repo_name in repos_to_clone:
+        result_l                                        =  []
 
-            with Profiler(f"Setting up repo '{some_repo_name}'"):
+        to_do                                           = [self._setup_one_repo(repo_name, project, operate, root_folder)
+                                                            for repo_name in repos_to_clone]
 
-                Logger.log_info(f"\t... cloning repo '{some_repo_name}' ...")
-                remote_url                                  = f"{REMOTE_ROOT}/{some_repo_name}.git"
-                local_url                                   = f"{LOCAL_ROOT}/{project}/{some_repo_name}"
-                try:
-                    cloned_repo                             = Repo.clone_from(remote_url, local_url, **kwargs)
-                except Exception as ex:
-                    raise ValueError(f"Couldn't clone '{some_repo_name}'"
-                                     + f"\n\tremote = {remote_url}"
-                                     + f"\n\rlocal = {local_url}"
-                                     + f"\n\terror = {ex}"
-                                     )
-                
-                local_git                                   = GitLocalClient(cloned_repo.working_dir)
+        to_do_iter                                      = asyncio.as_completed(to_do)
 
-                # Now that we cloned the repo, we may need to configure the remote to include the access token.
-                # This can happen during testing, for example, where the access token is for a test robot and therefore
-                # GitHub access tokens are not included in this machine's windows credentials
-                #
-                # We will determine if there is a need to do this based on the profile we are running under. 
-                # Obviously this is a security risk, since the access token will be added in clear text to the Git
-                # repo configuration. 
-                # So the profile should only allow this when it is a profile for resources that don't need to be protected,
-                # such as a test robot acting on discardable GitHub repos that only exist for testing purposes.
-                # 
-                if P.OK_TO_DISPLAY_TOKEN():
-                    DOMAIN                              = f"https://{P.USER}:{Secrets.GIT_HUB_TOKEN()}@github.com"
-                    PATH                                = f"{P.GH_ORGANIZATION}/{some_repo_name}.git"
-                    local_git.execute(command           = f"git config --local remote.origin.url {DOMAIN}/{PATH}")
+        for coro in to_do_iter:
+            coro_result                                 = await coro
+            result_l.append(coro_result)
 
-                Logger.log_info(f"\t... creating branches {BRANCHES_TO_CREATE[1:]} for repo '{some_repo_name}' ...")
 
-                for branch in BRANCHES_TO_CREATE[1:]:
-                
-                    # Only create branch with '-b' option if it already exists.
-                    if local_git.execute(command             = f"git branch --list {branch}") == "":
-                        local_git.execute(command            = f"git checkout -b {branch}")
-                    else:
-                        local_git.execute(command            = f"git checkout {branch}")
+    async def _setup_one_repo(self, repo_name, project, operate, root_folder):
+        '''
+        '''
+        P                                               = self.profile
 
-                    # Check if branch exists in remote. If not, push local branch. If yes, set it as the upstream.
-                    if local_git.execute(command             = f"git ls-remote --heads origin {branch}") == "":
-                        local_git.execute(command            = f"git push origin -u {branch}")
-                    else:
-                        local_git.execute(command            = f"git branch --set-upstream-to=origin/{branch} {branch}")
+        BRANCHES_TO_CREATE                              = P.BRANCHES_TO_CREATE(operate)
+        LOCAL_ROOT                                      = P.LOCAL_ROOT(operate, root_folder)
+        REMOTE_ROOT                                     = P.REMOTE_ROOT
 
-                Logger.log_info(f"\t... configuring repo '{some_repo_name}' ...")
-                self.configure(cloned_repo.working_dir)
+        # Per CCL policy, we don't want to clone the master branch, since it should never exist locally.
+        # Therefore have to clone a different branch and only bring in that branch during the cloning.
+        branch_to_clone                                 = BRANCHES_TO_CREATE[0]
+        kwargs                                          = {"branch": branch_to_clone}
 
-    def configure(self, repo_path):
+        with Profiler(f"Setting up repo '{repo_name}'"):
+
+            remote_url                                  = f"{REMOTE_ROOT}/{repo_name}.git"
+            local_url                                   = f"{LOCAL_ROOT}/{project}/{repo_name}"
+            try:
+                cloned_repo                             = await asyncio.to_thread(Repo.clone_from,
+                                                                                  remote_url, local_url, **kwargs)
+            except Exception as ex:
+                raise ValueError(f"Couldn't clone '{repo_name}'"
+                                    + f"\n\tremote = {remote_url}"
+                                    + f"\n\rlocal = {local_url}"
+                                    + f"\n\terror = {ex}"
+                                    )
+            Logger.log_info(f"\t... cloned repo '{repo_name}' ...")
+            
+            local_git                                   = GitLocalClient(cloned_repo.working_dir)
+
+            # Now that we cloned the repo, we may need to configure the remote to include the access token.
+            # This can happen during testing, for example, where the access token is for a test robot and therefore
+            # GitHub access tokens are not included in this machine's windows credentials
+            #
+            # We will determine if there is a need to do this based on the profile we are running under. 
+            # Obviously this is a security risk, since the access token will be added in clear text to the Git
+            # repo configuration. 
+            # So the profile should only allow this when it is a profile for resources that don't need to be protected,
+            # such as a test robot acting on discardable GitHub repos that only exist for testing purposes.
+            # 
+            if P.OK_TO_DISPLAY_TOKEN():
+                DOMAIN                              = f"https://{P.USER}:{Secrets.GIT_HUB_TOKEN()}@github.com"
+                PATH                                = f"{P.GH_ORGANIZATION}/{repo_name}.git"
+                await local_git.execute(command           = f"git config --local remote.origin.url {DOMAIN}/{PATH}")
+
+
+
+            for branch in BRANCHES_TO_CREATE[1:]:
+            
+                # Only create branch with '-b' option if it already exists.
+                if await local_git.execute(command             = f"git branch --list {branch}") == "":
+                    await local_git.execute(command            = f"git checkout -b {branch}")
+                else:
+                    await local_git.execute(command            = f"git checkout {branch}")
+
+                # Check if branch exists in remote. If not, push local branch. If yes, set it as the upstream.
+                if await local_git.execute(command             = f"git ls-remote --heads origin {branch}") == "":
+                    await local_git.execute(command            = f"git push origin -u {branch}")
+                else:
+                    await local_git.execute(command            = f"git branch --set-upstream-to=origin/{branch} {branch}")
+
+            Logger.log_info(f"\t... created branches {BRANCHES_TO_CREATE[1:]} for repo '{repo_name}' ...")
+            
+            with Profiler(f"\tConfiguring repo '{repo_name}' ..."):
+                await self.configure(cloned_repo.working_dir)
+
+        # By away of status, return the repo_name so the caller knows which repo was created
+        return repo_name
+
+
+    async def configure(self, repo_path):
         '''
         Configures a local repo as per the CCL standards.
 
@@ -148,15 +175,15 @@ class RepoSetup():
         #local_git.execute(command                       = f'git config --local credential.helper "{WIN_CRED_PATH}"')
         #local_git.execute(command                       = f'git config --local credential.https://dev.azure.com.usehttppath true')
         
-        local_git.execute(command                       = f'git config --local user.name "{USER}"')
-        local_git.execute(command                       = f'git config --local user.email "{USER_EMAIL}"')
+        await local_git.execute(command                 = f'git config --local user.name "{USER}"')
+        await local_git.execute(command                 = f'git config --local user.email "{USER_EMAIL}"')
     
-        local_git.execute(command                       = f'git config --local diff.tool bc')
+        await local_git.execute(command                 = f'git config --local diff.tool bc')
         
-        local_git.execute(command                       = f'git config --local difftool.prompt false')
+        await local_git.execute(command                 = f'git config --local difftool.prompt false')
     
-        local_git.execute(command                       = f'git config --local difftool.bc.path "{BC_PATH}"')
-        local_git.execute(command                       = f'git config --local difftool.bc.trustExitCode true')
+        await local_git.execute(command                 = f'git config --local difftool.bc.path "{BC_PATH}"')
+        await local_git.execute(command                 = f'git config --local difftool.bc.trustExitCode true')
 
         # GOTCHA
         # Configuring BeyondCompare to work in WSL can be tricky. These settings are based on this post:
@@ -185,14 +212,14 @@ class RepoSetup():
         #
         #   f'git config --local difftool.bc.cmd \'"{BC_PATH}" "$(wslpath -aw $LOCAL)" "$(wslpath -aw $REMOTE)"\''
         #
-        local_git.execute(command                       = f'git config --local difftool.bc.cmd \'"{BC_PATH}"' 
+        await local_git.execute(command                 = f'git config --local difftool.bc.cmd \'"{BC_PATH}"' 
                                                             + f' "$(wslpath -aw $LOCAL)" "$(wslpath -aw $REMOTE)"\'')
     
     
-        local_git.execute(command                       = f'git config --local merge.tool bc')
+        await local_git.execute(command                 = f'git config --local merge.tool bc')
     
-        local_git.execute(command                       = f'git config --local mergetool.bc.path "{BC_PATH}"')
-        local_git.execute(command                       = f'git config --local mergetool.bc.trustExitCode true')
+        await local_git.execute(command                 = f'git config --local mergetool.bc.path "{BC_PATH}"')
+        await local_git.execute(command                 = f'git config --local mergetool.bc.trustExitCode true')
     
         # For mergetool.bc.cmd we have the same challenges with triple quotes as described above for the difftool.bc.cmd. 
         # In this case, this # is the argument list we need:
@@ -208,6 +235,6 @@ class RepoSetup():
         #
         #   f'git config --local mergetool.bc.cmd \'"{BC_PATH}" "$(wslpath -aw $LOCAL)" "$(wslpath -aw $REMOTE)" "$(wslpath -aw $BASE)" "$(wslpath -aw $MERGED)"\''
         #
-        local_git.execute(command                       = f'git config --local mergetool.bc.cmd \'"{BC_PATH}"'
+        await local_git.execute(command                 = f'git config --local mergetool.bc.cmd \'"{BC_PATH}"'
                                                             + f' "$(wslpath -aw $LOCAL)" "$(wslpath -aw $REMOTE)"'
                                                             + f' "$(wslpath -aw $BASE)"  "$(wslpath -aw $MERGED)"\'')
