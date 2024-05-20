@@ -1,1 +1,34 @@
+# Python build
 __pycache__/
+*.egg-info/
+
+
+# Used in documentation
+build/
+*.~docx
+*.~xlsx
+*.~vsdx
+*.~pptx
+
+
+# Used in operator tools
+*.ipynb_checkpoints/
+
+# Used in test scenarios
+ACTUALS@*/
+RUN_NOTES/
+
+# This is excluded from GIT since it is used to commit, pull, push etc., so it is changing while
+# we do GIT operations, making it trigger errors if GIT tries to commit/push/pull it while it is changing
+# precisely because we are doing commit/push/pull.
+#
+# To get out of that "chicken-and-egg" problem, we have two notebooks, to separate definitio from runtime:
+#
+#   * pipeline_definition_branch_lifecycle.ipynb: is never run, but holds the business logic of the pipeline.
+#                                                   It is in source control.
+#
+#   * pipeline_runner_branch_lifecycle.ipynb: not in source control, and is what runs. It's business logic
+#                                               should be a copy of the definition notebook. So any changes to either
+#                                               must be synchronized with the other by copying one onto the other.
+#
+pipeline_runner_branch_lifecycle.ipynb
