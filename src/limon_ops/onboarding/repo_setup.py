@@ -81,6 +81,7 @@ class RepoSetup():
         for coro in to_do_iter:
             coro_result                                 = await coro
             result_l.append(coro_result)
+        result_l
 
 
     async def _setup_one_repo(self, repo_name, project, operate, root_folder):
